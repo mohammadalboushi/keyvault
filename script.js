@@ -95,8 +95,8 @@ auth.onAuthStateChanged(user => {
             unsubscribeVault = null;
         }
         
-        const localAccs = localStorage.getItem('localVaultAccounts');
-        const localFolds = localStorage.getItem('localVaultFolders');
+        const localAccs = localStorage.getItem('localVaultEmailAccounts');
+        const localFolds = localStorage.getItem('localVaultEmailFolders');
         accounts = localAccs ? JSON.parse(localAccs) : [];
         folders = localFolds ? JSON.parse(localFolds) : ["عام"];
         
@@ -180,8 +180,8 @@ function handleLogout() {
     closeSideMenu();
     customConfirm("هل تريد تسجيل الخروج؟", () => {
         auth.signOut().then(() => {
-            localStorage.removeItem('localVaultAccounts');
-            localStorage.removeItem('localVaultFolders');
+            localStorage.removeItem('localVaultEmailAccounts');
+            localStorage.removeItem('localVaultEmailFolders');
             accounts = [];
             folders = ["عام"];
             renderVault();
@@ -201,7 +201,7 @@ function safeToggleMenu(e) {
         menu.classList.remove('open');
         overlay.classList.remove('active');
     } else {
-        const appPass = localStorage.getItem('appPass');
+        const appPass = localStorage.getItem('appEmailPass');
         if (appPass) {
             openPasswordModal("رمز القائمة", (v) => {
                 if (v === appPass) {
@@ -230,7 +230,7 @@ function closeSideMenu() {
 function updateLockText(hasLock) {
     const lockText = document.getElementById('lockMenuText');
     if(lockText) {
-        lockText.innerText = (hasLock || localStorage.getItem('appPass')) ? "إلغاء قفل التطبيق" : "تعيين قفل للتطبيق";
+        lockText.innerText = (hasLock || localStorage.getItem('appEmailPass')) ? "إلغاء قفل التطبيق" : "تعيين قفل للتطبيق";
     }
 }
 
@@ -258,8 +258,8 @@ function setupRealtimeListener(uid) {
             cloudFolders = data.folders || ["عام", "فيسبوك", "جوجل"];
         }
 
-        const localAccs = localStorage.getItem('localVaultAccounts');
-        const localFolds = localStorage.getItem('localVaultFolders');
+        const localAccs = localStorage.getItem('localVaultEmailAccounts');
+        const localFolds = localStorage.getItem('localVaultEmailFolders');
         
         if (localAccs) {
             const parsedLocalAccs = JSON.parse(localAccs);
@@ -273,8 +273,8 @@ function setupRealtimeListener(uid) {
                     });
                 }
             }
-            localStorage.removeItem('localVaultAccounts');
-            localStorage.removeItem('localVaultFolders');
+            localStorage.removeItem('localVaultEmailAccounts');
+            localStorage.removeItem('localVaultEmailFolders');
         }
 
         accounts = cloudAccounts;
@@ -310,8 +310,8 @@ function saveToCloud() {
             showToast("حدث خطأ أثناء الحفظ");
         });
     } else {
-        localStorage.setItem('localVaultAccounts', JSON.stringify(accounts));
-        localStorage.setItem('localVaultFolders', JSON.stringify(folders));
+        localStorage.setItem('localVaultEmailAccounts', JSON.stringify(accounts));
+        localStorage.setItem('localVaultEmailFolders', JSON.stringify(folders));
     }
 }
 
@@ -398,11 +398,11 @@ function importDataWrapper(e) {
 
 function handleAppLockSettings() {
     closeSideMenu();
-    const appPass = localStorage.getItem('appPass');
+    const appPass = localStorage.getItem('appEmailPass');
     if(appPass) {
         openPasswordModal("أدخل الرمز لإزالته", (v) => {
             if(v === appPass) { 
-                localStorage.removeItem('appPass'); 
+                localStorage.removeItem('appEmailPass'); 
                 showToast("تم إزالة القفل");
             }
             else showToast("خطأ في الرمز");
@@ -410,7 +410,7 @@ function handleAppLockSettings() {
     } else {
         openPasswordModal("تعيين رمز جديد", (v) => { 
             if(v) { 
-                localStorage.setItem('appPass', v); 
+                localStorage.setItem('appEmailPass', v); 
                 showToast("تم القفل");
             } 
         });
@@ -618,7 +618,7 @@ function toggleSelectionMode() {
 
 function deleteSelected() {
     if(selectedIds.size === 0) return;
-    const appPass = localStorage.getItem('appPass');
+    const appPass = localStorage.getItem('appEmailPass');
     
     const doDelete = () => {
         customConfirm(`هل أنت متأكد من الحذف؟`, () => {
@@ -808,7 +808,7 @@ function openContextMenu(type, id) {
 function ctxAction(action) {
     goBack();
     const acc = accounts.find(a => a.id === currentCtxId);
-    const appPass = localStorage.getItem('appPass');
+    const appPass = localStorage.getItem('appEmailPass');
     
     setTimeout(() => {
         if (!acc) return;
@@ -885,16 +885,16 @@ function startVaultPress() {
 function cancelVaultPress() { clearTimeout(vaultPressTimer); }
 
 function handleVaultLongPress() {
-    const vp = localStorage.getItem('vaultPass');
+    const vp = localStorage.getItem('vaultEmailPass');
     if(vp) openPasswordModal("إزالة قفل الخزنة", v => { 
         if(v===vp){ 
-            localStorage.removeItem('vaultPass'); 
+            localStorage.removeItem('vaultEmailPass'); 
             showToast("تم الإلغاء"); 
         } else showToast("خطأ"); 
     });
     else openPasswordModal("قفل الخزنة", v => { 
         if(v){ 
-            localStorage.setItem('vaultPass', v); 
+            localStorage.setItem('vaultEmailPass', v); 
             showToast("تم القفل");
         } 
     });
@@ -903,7 +903,7 @@ function handleVaultLongPress() {
 function openVaultCheck() {
     if(isLongPress) return;
     
-    const vp = localStorage.getItem('vaultPass');
+    const vp = localStorage.getItem('vaultEmailPass');
     if(vp) openPasswordModal("رمز الخزنة", v => { if(v===vp) openVault(); else showToast("خطأ"); });
     else openVault();
 }

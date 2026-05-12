@@ -275,11 +275,11 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="script.js"></script>
+<script src="script-email.js"></script>
 
 <script>
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js')
+    navigator.serviceWorker.register('./sw-email.js')
       .then(reg => console.log('Service Worker Registered!', reg))
       .catch(err => console.error('Service Worker Registration Failed!', err));
   }
