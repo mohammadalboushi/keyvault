@@ -55,7 +55,7 @@ let currentSort = 'newest';
 let authMode = 'login'; // 'login' or 'signup'
 
 // --- نظام التشفير ---
-const SECRET_KEY = "AbuFayez_Secure_Vault_2026";
+let SECRET_KEY = sessionStorage.getItem('user_secret_key') || 'guest_offline_key';
 
 function encryptPass(text) {
     if (!text) return "";
@@ -167,24 +167,37 @@ function submitAuth() {
 
     if (authMode === 'login') {
         auth.signInWithEmailAndPassword(email, pass)
-            .then(() => { goBack(); showToast("أهلاً بك مجدداً في خزنتك! 🔒"); })
+            .then(() => { 
+                // هون التعديل: حفظنا الباسوورد كمفتاح تشفير بالذاكرة المؤقتة
+                sessionStorage.setItem('user_secret_key', pass);
+                SECRET_KEY = pass;
+                
+                goBack(); 
+                showToast("أهلاً بك مجدداً في خزنتك! 🔒"); 
+            })
             .catch(err => {
-                // ضفنا الكونسول هون لتسجيل الدخول
                 console.error("Firebase Login Error:", err.code, err.message);
                 showToast(getAuthError(err.code));
             })
             .finally(() => btn.innerText = originalText);
     } else {
         auth.createUserWithEmailAndPassword(email, pass)
-            .then(() => { goBack(); showToast("تم إنشاء الحساب بنجاح! 🎉"); })
+            .then(() => { 
+                // وهون كمان نفس التعديل للي بيعمل حساب جديد
+                sessionStorage.setItem('user_secret_key', pass);
+                SECRET_KEY = pass;
+                
+                goBack(); 
+                showToast("تم إنشاء الحساب بنجاح! 🎉"); 
+            })
             .catch(err => {
-                // وضفنا الكونسول هون لإنشاء الحساب
                 console.error("Firebase Signup Error:", err.code, err.message);
                 showToast(getAuthError(err.code));
             })
             .finally(() => btn.innerText = originalText);
     }
 }
+
 
 
 function handleResetPassword() {
@@ -211,6 +224,10 @@ function handleLogout() {
     closeSideMenu();
     customConfirm("هل تريد تسجيل الخروج؟", () => {
         auth.signOut().then(() => {
+            // التعديل هون: مسح المفتاح من الذاكرة وتصفير المتغير
+            sessionStorage.removeItem('user_secret_key');
+            SECRET_KEY = 'guest_offline_key';
+
             localStorage.removeItem('localVaultEmailAccounts');
             localStorage.removeItem('localVaultEmailFolders');
             accounts = [];
@@ -220,6 +237,7 @@ function handleLogout() {
         });
     });
 }
+
 // ===============================================================
 
 // القائمة الجانبية
