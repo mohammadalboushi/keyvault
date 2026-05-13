@@ -366,13 +366,20 @@ function saveToCloud() {
 
 function exportDataAuto() {
     closeSideMenu();
-    const dataToSave = { accounts: accounts, folders: folders };
+    // رح نفك تشفير كل الحسابات بالنسخة القديمة قبل التصدير
+    const plainAccounts = accounts.map(acc => ({
+        ...acc,
+        pass: decryptPass(acc.pass) // هون فكينا التشفير
+    }));
+    
+    const dataToSave = { accounts: plainAccounts, folders: folders };
     const blob = new Blob([JSON.stringify(dataToSave)], {type: "application/json"});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = "secrets_vault_backup.json";
+    a.download = "secrets_vault_backup_Plain.json";
     a.click();
 }
+
 
 function importDataWrapper(e) {
     closeSideMenu();
@@ -390,6 +397,8 @@ function importDataWrapper(e) {
             }));
             
             const cleanAccounts = [];
+            // المفتاح القديم للإنقاذ وفك التشفير
+            const OLD_KEY = "AbuFayez_Secure_Vault_2026"; 
 
             rawAccounts.forEach(importedAcc => {
                 const rawEmail = importedAcc.email || importedAcc.title || "مستورد";
@@ -400,9 +409,23 @@ function importDataWrapper(e) {
                 if (!seenCombinations.has(combo)) {
                     seenCombinations.add(combo);
                     
-                    // --- التشفير الذكي عند الاستيراد ---
                     let finalPass = importedAcc.pass || "...";
-                    if (!finalPass.startsWith("U2FsdGVkX1")) {
+                    
+                    // إذا الباسوورد جاية مشفرة من النسخة القديمة
+                    if (finalPass.startsWith("U2FsdGVkX1")) {
+                        try {
+                            // منفكها بالمفتاح القديم
+                            const bytes = CryptoJS.AES.decrypt(finalPass, OLD_KEY);
+                            const plainText = bytes.toString(CryptoJS.enc.Utf8);
+                            if (plainText) {
+                                // ومنرجع منشفرها فورا بالمفتاح الديناميكي الجديد للمستخدم
+                                finalPass = encryptPass(plainText); 
+                            }
+                        } catch(err) {
+                            console.log("خطأ بفك تشفير حساب:", rawEmail);
+                        }
+                    } else {
+                        // إذا كانت مو مشفرة أصلا
                         finalPass = encryptPass(finalPass);
                     }
                     
@@ -421,21 +444,12 @@ function importDataWrapper(e) {
                 if(!folders.includes(f)) folders.push(f);
             });
 
-            cleanAccounts.forEach(acc => {
-                if (acc.folder && !folders.includes(acc.folder)) {
-                    folders.push(acc.folder);
-                }
-            });
-
             saveToCloud();
             renderFoldersBar();
             applySort(currentSort);
 
-            if (cleanAccounts.length === 0 && rawAccounts.length > 0) {
-                showToast("الحسابات موجودة مسبقاً");
-            } else {
-                showToast("تم استعادة البيانات بنجاح");
-            }
+            showToast("تم استعادة البيانات وتحديث التشفير بنجاح! 🚀");
+            
         } catch(err){
             showToast("ملف غير صالح");
         }
@@ -444,6 +458,7 @@ function importDataWrapper(e) {
         reader.readAsText(e.target.files[0]);
     }
 }
+
 
 function handleAppLockSettings() {
     closeSideMenu();
