@@ -1,9 +1,9 @@
-const CACHE_NAME = 'vault-email-cache-v5';
+const CACHE_NAME = 'vault-email-cache-v7';
 const ASSETS = [
   './',
-  './index-email.html',
+  './index.html',
   './style.css',
-  './script-email.js',
+  './script.js',
   './manifest.json',
   'https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js',
   'https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js',
