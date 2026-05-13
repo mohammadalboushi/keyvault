@@ -1,12 +1,14 @@
 const firebaseConfig = {
-  apiKey: "AIzaSyBB_U4C880PW4GxZd8FALv8yBSiP2mNeBY",
-  authDomain: "malaboushi.firebaseapp.com",
-  projectId: "malaboushi",
-  storageBucket: "malaboushi.firebasestorage.app",
-  messagingSenderId: "110336819350",
-  appId: "1:110336819350:web:2b1b0488e72b811f0602b7",
-  measurementId: "G-94ZT4TQYZY"
+  apiKey: "AIzaSyCMLMIUht6Az9R1-kiJeNGVN0BeL1N5rG4",
+  authDomain: "wassouf1997.firebaseapp.com",
+  databaseURL: "https://wassouf1997-default-rtdb.firebaseio.com",
+  projectId: "wassouf1997",
+  storageBucket: "wassouf1997.firebasestorage.app",
+  messagingSenderId: "979816526016",
+  appId: "1:979816526016:web:a0538d0d686bf2ff123d25",
+  measurementId: "G-SDRQLNDM23"
 };
+
 
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
