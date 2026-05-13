@@ -151,15 +151,24 @@ function submitAuth() {
     if (authMode === 'login') {
         auth.signInWithEmailAndPassword(email, pass)
             .then(() => { goBack(); showToast("أهلاً بك مجدداً في خزنتك! 🔒"); })
-            .catch(err => showToast(getAuthError(err.code)))
+            .catch(err => {
+                // ضفنا الكونسول هون لتسجيل الدخول
+                console.error("Firebase Login Error:", err.code, err.message);
+                showToast(getAuthError(err.code));
+            })
             .finally(() => btn.innerText = originalText);
     } else {
         auth.createUserWithEmailAndPassword(email, pass)
             .then(() => { goBack(); showToast("تم إنشاء الحساب بنجاح! 🎉"); })
-            .catch(err => showToast(getAuthError(err.code)))
+            .catch(err => {
+                // وضفنا الكونسول هون لإنشاء الحساب
+                console.error("Firebase Signup Error:", err.code, err.message);
+                showToast(getAuthError(err.code));
+            })
             .finally(() => btn.innerText = originalText);
     }
 }
+
 
 function handleResetPassword() {
     const email = document.getElementById('authEmail').value.trim();
