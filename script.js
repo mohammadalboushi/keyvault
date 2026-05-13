@@ -54,25 +54,59 @@ let currentSort = 'newest';
 
 let authMode = 'login'; // 'login' or 'signup'
 
-// --- نظام التشفير ---
+// --- نظام التشفير (النسخة 10/10) ---
 let SECRET_KEY = sessionStorage.getItem('user_secret_key') || 'guest_offline_key';
+const APP_SALT = CryptoJS.enc.Utf8.parse("AbuFayez_Vault_Salt_2026_V2");
+let DERIVED_KEY = null; // الكاش السحري للأداء
+
+function getStrongKey() {
+    if (DERIVED_KEY) return DERIVED_KEY;
+    // رفعنا قوة التشفير وعملنا كاش للمفتاح مشان ما ينفجر معالج الشاومي
+    DERIVED_KEY = CryptoJS.PBKDF2(SECRET_KEY, APP_SALT, { keySize: 256 / 32, iterations: 20000 });
+    return DERIVED_KEY;
+}
 
 function encryptPass(text) {
     if (!text) return "";
-    return CryptoJS.AES.encrypt(text, SECRET_KEY).toString();
+    const strongKey = getStrongKey();
+    const iv = CryptoJS.lib.WordArray.random(128 / 8); // IV عشوائي لكل عملية
+    const encrypted = CryptoJS.AES.encrypt(text, strongKey, { iv: iv });
+    // دمج الـ IV مع النص المشفر مشان نقدر نفكه بعدين
+    return iv.toString() + ":" + encrypted.toString();
 }
 
 function decryptPass(ciphertext) {
     if (!ciphertext) return "";
     try {
-        const bytes = CryptoJS.AES.decrypt(ciphertext, SECRET_KEY);
-        const originalText = bytes.toString(CryptoJS.enc.Utf8);
-        return originalText || ciphertext;
+        const strongKey = getStrongKey();
+        
+        // فحص إذا كان النص المشفر بيحتوي على IV عشوائي (النسخة الجديدة)
+        if (ciphertext.includes(":")) {
+            const parts = ciphertext.split(":");
+            const iv = CryptoJS.enc.Hex.parse(parts[0]);
+            const encryptedData = parts[1];
+            const bytes = CryptoJS.AES.decrypt(encryptedData, strongKey, { iv: iv });
+            return bytes.toString(CryptoJS.enc.Utf8) || ciphertext;
+        } else {
+            // دعم النسخ القديمة (Fallback) عشان ما تضيع حساباتك القديمة
+            const bytes = CryptoJS.AES.decrypt(ciphertext, strongKey, { iv: CryptoJS.enc.Utf8.parse("AbuFayez_Vault_Salt_2026") });
+            const originalText = bytes.toString(CryptoJS.enc.Utf8);
+            if (!originalText) {
+                return CryptoJS.AES.decrypt(ciphertext, SECRET_KEY).toString(CryptoJS.enc.Utf8) || ciphertext;
+            }
+            return originalText;
+        }
     } catch (e) {
-        return ciphertext;
+        try {
+            return CryptoJS.AES.decrypt(ciphertext, SECRET_KEY).toString(CryptoJS.enc.Utf8) || ciphertext;
+        } catch(err) {
+            return ciphertext;
+        }
     }
 }
 // --------------------
+
+
 
 // ================= نظام إدارة المستخدمين الجديد =================
 auth.onAuthStateChanged(user => {
@@ -227,6 +261,7 @@ function handleLogout() {
             // التعديل هون: مسح المفتاح من الذاكرة وتصفير المتغير
             sessionStorage.removeItem('user_secret_key');
             SECRET_KEY = 'guest_offline_key';
+            DERIVED_KEY = null; // تصفير الكاش تبع المفتاح للحماية القسوى
 
             localStorage.removeItem('localVaultEmailAccounts');
             localStorage.removeItem('localVaultEmailFolders');
@@ -619,7 +654,15 @@ function renderVault() {
     list.innerHTML = '';
     let displayAccounts = accounts;
     if (activeFolder !== 'All') displayAccounts = displayAccounts.filter(acc => acc.folder === activeFolder);
-    if(searchVal) displayAccounts = displayAccounts.filter(acc => (acc.email && acc.email.toLowerCase().includes(searchVal)) || (acc.pass && acc.pass.toLowerCase().includes(searchVal)));
+    
+    if(searchVal) {
+        displayAccounts = displayAccounts.filter(acc => {
+            const matchEmail = acc.email && acc.email.toLowerCase().includes(searchVal);
+            const decrypted = decryptPass(acc.pass) || ""; // تأمين المتغير
+            const matchPass = acc.pass && decrypted.toLowerCase().includes(searchVal);
+            return matchEmail || matchPass;
+        });
+    }
     
     if(displayAccounts.length === 0) { 
         list.innerHTML = '<div style="text-align:center; padding:60px 20px; color:var(--text-3);"><svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="opacity:0.3; margin-bottom:10px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><h3>لا توجد حسابات</h3></div>'; 
@@ -659,6 +702,7 @@ function renderVault() {
         list.appendChild(card);
     });
 }
+
 
 function toggleSelectionMode() {
     isSelectionMode = !isSelectionMode;
@@ -716,17 +760,26 @@ function handlePassClick(id) {
     if(isLongPress) return;
     const el = document.getElementById(`pass-${id}`);
     const acc = accounts.find(a => a.id === id);
+    
     if(el.classList.contains('hidden-pass')) {
-         // --- فك التشفير عند العرض ---
          el.innerText = decryptPass(acc.pass) || '...'; 
          el.classList.remove('hidden-pass');
          el.style.fontSize = "16px"; el.style.letterSpacing = "0";
+         
+         setTimeout(() => {
+             if(!el.classList.contains('hidden-pass')) {
+                 el.innerText = '••••••••'; 
+                 el.classList.add('hidden-pass'); 
+                 el.style.fontSize = "22px"; el.style.letterSpacing = "4px";
+             }
+         }, 3000);
     } else { 
-        el.innerText = '••••••••'; 
-        el.classList.add('hidden-pass'); 
-        el.style.fontSize = "22px"; el.style.letterSpacing = "4px";
+         el.innerText = '••••••••'; 
+         el.classList.add('hidden-pass'); 
+         el.style.fontSize = "22px"; el.style.letterSpacing = "4px";
     }
 }
+
 
 function openFolderSelectModal(title) {
     showOverlay('folderSelectModal');
