@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vault-email-cache-33';
+const CACHE_NAME = 'vault-email-cache-34';
 const ASSETS = [
   './',
   './index.html',

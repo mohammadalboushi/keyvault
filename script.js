@@ -366,19 +366,14 @@ function saveToCloud() {
 
 function exportDataAuto() {
     closeSideMenu();
-    // رح نفك تشفير كل الحسابات بالنسخة القديمة قبل التصدير
-    const plainAccounts = accounts.map(acc => ({
-        ...acc,
-        pass: decryptPass(acc.pass) // هون فكينا التشفير
-    }));
-    
-    const dataToSave = { accounts: plainAccounts, folders: folders };
+    const dataToSave = { accounts: accounts, folders: folders };
     const blob = new Blob([JSON.stringify(dataToSave)], {type: "application/json"});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = "secrets_vault_backup_Plain.json";
+    a.download = "secrets_vault_backup.json";
     a.click();
 }
+
 
 
 function importDataWrapper(e) {
@@ -576,7 +571,8 @@ function saveAccount(targetFolder) {
 
     // --- التشفير قبل الحفظ ---
     const encryptedPass = encryptPass(pass);
-    accounts.unshift({ id: Date.now(), email, pass: encryptedPass, folder: targetFolder });
+accounts.unshift({ id: Date.now(), email, pass: encryptedPass, folder: targetFolder });
+
     
     saveToCloud();
     document.getElementById('emailInput').value = '';
