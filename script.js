@@ -184,8 +184,11 @@ function getAuthError(code) {
     if(code === 'auth/wrong-password') return "كلمة المرور خاطئة";
     if(code === 'auth/email-already-in-use') return "هذا الإيميل مسجل مسبقاً";
     if(code === 'auth/weak-password') return "كلمة المرور ضعيفة (6 أحرف على الأقل)";
-    return "حدث خطأ، حاول مجدداً";
+    
+    // التعديل هون: رح نخليه يطبع كود الخطأ الحقيقي اللي جاي من فايربيس
+    return "الخطأ هو: " + code; 
 }
+
 
 function handleLogout() {
     closeSideMenu();
