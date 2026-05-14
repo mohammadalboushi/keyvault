@@ -31,15 +31,14 @@ let isMoveAction = false;
 let folderRenameTarget = null;
 let vaultPressTimer = null;
 let currentSort = 'newest';
-let renderCounter = 0; // لمنع تداخل عمليات البحث غير المتزامنة
+let renderCounter = 0; 
 
-let authMode = 'login'; // 'login', 'signup', or 'unlock'
+let authMode = 'login'; 
 
 // ================= نظام التشفير العسكري الجديد (Web Crypto API) =================
-let cryptoKey = null; // الاحتفاظ بالمفتاح في الذاكرة الحية فقط
-let SECRET_KEY = null; // يستخدم فقط كدعم للبيانات القديمة
+let cryptoKey = null; 
+let SECRET_KEY = null; 
 
-// تحويل رموز PIN إلى طلاسم لمنع قراءتها من الـ LocalStorage
 async function hashString(text) {
     const msgBuffer = new TextEncoder().encode(text + "AbuFayez_Vault_PIN_Salt");
     const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgBuffer);
@@ -47,7 +46,6 @@ async function hashString(text) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// توليد مفتاح قوي جداً باستخدام PBKDF2 في المتصفح
 async function generateKey(password) {
     const enc = new TextEncoder();
     const keyMaterial = await window.crypto.subtle.importKey(
@@ -59,7 +57,6 @@ async function generateKey(password) {
     );
 }
 
-// التشفير بوضعية AES-GCM الآمنة (مع التوقيع المدمج)
 async function encryptPass(text) {
     if (!text || !cryptoKey) return "";
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
@@ -68,14 +65,11 @@ async function encryptPass(text) {
     
     const ivBase64 = btoa(String.fromCharCode(...iv));
     const cipherBase64 = btoa(String.fromCharCode(...new Uint8Array(ciphertext)));
-    return `v2:${ivBase64}:${cipherBase64}`; // v2 لتمييز التشفير الجديد
+    return `v2:${ivBase64}:${cipherBase64}`; 
 }
 
-// فك التشفير مع دعم النسخ القديمة
 async function decryptPass(ciphertext) {
     if (!ciphertext) return "";
-    
-    // النظام الجديد GCM
     if (ciphertext.startsWith("v2:") && cryptoKey) {
         try {
             const parts = ciphertext.split(":");
@@ -83,16 +77,11 @@ async function decryptPass(ciphertext) {
             const cipher = Uint8Array.from(atob(parts[2]), c => c.charCodeAt(0));
             const decrypted = await window.crypto.subtle.decrypt({name: "AES-GCM", iv: iv}, cryptoKey, cipher);
             return new TextDecoder().decode(decrypted);
-        } catch (e) {
-            return "خطأ بالفك (GCM)";
-        }
+        } catch (e) { return "خطأ بالفك (GCM)"; }
     } 
-    
-    // دعم النظام القديم (CryptoJS) حتى لا يضيع تعبك القديم
     if (typeof CryptoJS !== 'undefined') {
         try {
             let DERIVED_KEY_OLD = CryptoJS.PBKDF2(SECRET_KEY || 'guest_offline_key', CryptoJS.enc.Utf8.parse("AbuFayez_Vault_Salt_2026_V2"), { keySize: 256 / 32, iterations: 20000 });
-            
             if (ciphertext.includes(":")) {
                 const parts = ciphertext.split(":");
                 const iv = CryptoJS.enc.Hex.parse(parts[0]);
@@ -108,8 +97,119 @@ async function decryptPass(ciphertext) {
     }
     return ciphertext;
 }
-// =====================================================================
 
+// ================= نظام البصمة الخارق (WebAuthn PRF) =================
+function bufferToBase64url(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let str = '';
+    for (let charCode of bytes) str += String.fromCharCode(charCode);
+    return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+function base64urlToBuffer(base64url) {
+    const padding = '='.repeat((4 - base64url.length % 4) % 4);
+    const base64 = (base64url + padding).replace(/\-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    const buffer = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) buffer[i] = rawData.charCodeAt(i);
+    return buffer.buffer;
+}
+
+const prfSalt32 = new Uint8Array(32);
+prfSalt32.set(new TextEncoder().encode("AbuFayez_Vault_PRF_Salt_2026_V1"));
+
+async function registerFingerprint() {
+    closeSideMenu();
+    if (!window.PublicKeyCredential || !cryptoKey) return showToast("التشفير مقفل أو الميزة غير مدعومة بجهازك");
+    try {
+        const userEmail = auth.currentUser ? auth.currentUser.email : "user@vault.com";
+        const credential = await navigator.credentials.create({
+            publicKey: {
+                challenge: window.crypto.getRandomValues(new Uint8Array(32)),
+                rp: { name: "خزنة أسراري", id: window.location.hostname },
+                user: { id: new TextEncoder().encode(userEmail), name: userEmail, displayName: userEmail },
+                pubKeyCredParams: [{alg: -7, type: "public-key"}, {alg: -257, type: "public-key"}],
+                authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+                extensions: { prf: { eval: { first: prfSalt32 } } }
+            }
+        });
+
+        const extResults = credential.getClientExtensionResults();
+        if (!extResults.prf || !extResults.prf.enabled) return showToast("جهازك لا يدعم استخراج مفتاح التشفير بالبصمة");
+
+        localStorage.setItem('passkey_id', bufferToBase64url(credential.rawId));
+        showToast("تم تفعيل البصمة بنجاح! 👆");
+    } catch (err) {
+        showToast("تم إلغاء التفعيل");
+    }
+}
+
+async function loginWithFingerprint() {
+    const passkeyId = localStorage.getItem('passkey_id');
+    if (!passkeyId) return showToast("البصمة غير مفعلة");
+
+    const btn = document.getElementById('authFpBtn');
+    const originalText = btn.innerText;
+    btn.innerText = "جاري التحقق...";
+
+    try {
+        const assertion = await navigator.credentials.get({
+            publicKey: {
+                challenge: window.crypto.getRandomValues(new Uint8Array(32)),
+                allowCredentials: [{ id: base64urlToBuffer(passkeyId), type: 'public-key', transports: ['internal'] }],
+                userVerification: 'required',
+                extensions: { prf: { eval: { first: prfSalt32 } } }
+            }
+        });
+
+        const extResults = assertion.getClientExtensionResults();
+        if (!extResults.prf || !extResults.prf.results || !extResults.prf.results.first) {
+            btn.innerText = originalText;
+            return showToast("فشل استخراج المفتاح");
+        }
+
+        const prfKey = extResults.prf.results.first; 
+        const keyMaterial = await window.crypto.subtle.importKey("raw", prfKey, {name: "PBKDF2"}, false, ["deriveBits", "deriveKey"]);
+        
+        cryptoKey = await window.crypto.subtle.deriveKey(
+            { name: "PBKDF2", salt: new TextEncoder().encode("AbuFayez_Vault_Salt_2026_V2"), iterations: 100000, hash: "SHA-256" },
+            keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+        );
+
+        SECRET_KEY = "fingerprint_unlocked"; 
+        if (auth.currentUser) setupRealtimeListener(auth.currentUser.uid);
+        goBack();
+        showToast("تم فتح الخزنة بالبصمة! 🔓");
+    } catch (err) {
+        showToast("تم إلغاء أو فشل البصمة");
+    }
+    btn.innerText = originalText;
+}
+
+// ================= حقن واجهة البصمة ديناميكياً =================
+document.addEventListener('DOMContentLoaded', () => {
+    // 1. إضافة زر تفعيل البصمة للقائمة الجانبية
+    const menuDivider = document.querySelectorAll('.menu-divider')[0];
+    if(menuDivider) {
+        const fpMenuBtn = document.createElement('button');
+        fpMenuBtn.className = 'menu-item';
+        fpMenuBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg><span>تفعيل الفتح بالبصمة</span>`;
+        fpMenuBtn.onclick = registerFingerprint;
+        menuDivider.parentNode.insertBefore(fpMenuBtn, menuDivider.nextSibling);
+    }
+
+    // 2. إضافة زر البصمة لشاشة تسجيل الدخول
+    const modalActions = document.querySelector('.modal-actions');
+    if(modalActions) {
+        const fpLoginBtn = document.createElement('button');
+        fpLoginBtn.className = 'btn btn-secondary full-width';
+        fpLoginBtn.id = 'authFpBtn';
+        fpLoginBtn.style.display = 'none';
+        fpLoginBtn.style.marginTop = '10px';
+        fpLoginBtn.innerHTML = 'الفتح بالبصمة 👆';
+        fpLoginBtn.onclick = loginWithFingerprint;
+        modalActions.appendChild(fpLoginBtn);
+    }
+});
 
 // ================= نظام إدارة المستخدمين =================
 auth.onAuthStateChanged(async user => {
@@ -133,12 +233,8 @@ auth.onAuthStateChanged(async user => {
             userAvatarEl.style.borderColor = 'rgba(139, 92, 246, 0.3)';
         }
         
-        // التحقق من وجود المفتاح بالذاكرة (لحماية الجلسة عند عمل Refresh)
-        if (!cryptoKey) {
-            openAuthModal('unlock', user.email);
-        } else {
-            setupRealtimeListener(user.uid);
-        }
+        if (!cryptoKey) openAuthModal('unlock', user.email);
+        else setupRealtimeListener(user.uid);
         
     } else {
         loginContainer.style.display = 'block';
@@ -152,12 +248,8 @@ auth.onAuthStateChanged(async user => {
             userAvatarEl.style.borderColor = 'var(--gray-border)';
         }
         
-        if(unsubscribeVault) {
-            unsubscribeVault();
-            unsubscribeVault = null;
-        }
+        if(unsubscribeVault) { unsubscribeVault(); unsubscribeVault = null; }
         
-        // تفعيل وضع الزائر وتوليد مفتاح مؤقت
         SECRET_KEY = 'guest_offline_key';
         await generateKey(SECRET_KEY);
         
@@ -198,6 +290,7 @@ function updateAuthUI() {
     const sub = document.getElementById('authSub');
     const submitBtn = document.getElementById('authSubmitBtn');
     const toggleBtn = document.getElementById('authToggleBtn');
+    const fpBtn = document.getElementById('authFpBtn');
 
     if (authMode === 'login') {
         title.innerText = 'تسجيل الدخول';
@@ -205,17 +298,22 @@ function updateAuthUI() {
         submitBtn.innerText = 'دخول للخزنة';
         toggleBtn.style.display = 'block';
         toggleBtn.innerText = 'إنشاء حساب جديد';
+        if(fpBtn) fpBtn.style.display = 'none';
     } else if (authMode === 'signup') {
         title.innerText = 'حساب جديد';
         sub.innerText = 'لحفظ ومزامنة بياناتك سحابياً';
         submitBtn.innerText = 'إنشاء الحساب';
         toggleBtn.style.display = 'block';
         toggleBtn.innerText = 'لدي حساب بالفعل';
+        if(fpBtn) fpBtn.style.display = 'none';
     } else if (authMode === 'unlock') {
         title.innerText = 'فك تشفير الخزنة 🔒';
         sub.innerText = 'أدخل كلمة المرور لفك التشفير (حماية الذاكرة)';
         submitBtn.innerText = 'فك التشفير';
         toggleBtn.style.display = 'none';
+        
+        // إظهار زر البصمة إذا كانت مفعلة مسبقاً
+        if(localStorage.getItem('passkey_id') && fpBtn) fpBtn.style.display = 'block';
     }
 }
 
@@ -236,9 +334,7 @@ async function submitAuth() {
             setupRealtimeListener(auth.currentUser.uid);
             goBack();
             showToast("تم فتح الخزنة! 🔓");
-        } catch(e) {
-            showToast("حدث خطأ في توليد المفتاح");
-        }
+        } catch(e) { showToast("حدث خطأ في توليد المفتاح"); }
         btn.innerText = originalText;
         return;
     }
@@ -315,9 +411,7 @@ async function safeToggleMenu(e) {
                     menu.classList.add('open');
                     overlay.classList.add('active');
                     updateLockText(true);
-                } else {
-                    showToast("خطأ بالرمز");
-                }
+                } else { showToast("خطأ بالرمز"); }
             });
         } else {
             menu.classList.add('open');
@@ -451,7 +545,7 @@ function importDataWrapper(e) {
                             const bytes = CryptoJS.AES.decrypt(finalPass, OLD_KEY);
                             const plainText = bytes.toString(CryptoJS.enc.Utf8);
                             if (plainText) finalPass = await encryptPass(plainText); 
-                        } catch(err) { console.log("خطأ بفك تشفير حساب:", rawEmail); }
+                        } catch(err) {}
                     } else if (!finalPass.startsWith("v2:")) {
                         finalPass = await encryptPass(finalPass);
                     }
@@ -473,9 +567,7 @@ function importDataWrapper(e) {
             applySort(currentSort);
 
             showToast("تم استعادة البيانات بنجاح! 🚀");
-        } catch(err){
-            showToast("ملف غير صالح");
-        }
+        } catch(err){ showToast("ملف غير صالح"); }
     };
     if(e.target.files.length > 0) reader.readAsText(e.target.files[0]);
 }
@@ -582,7 +674,6 @@ async function saveAccount(targetFolder) {
 
     if (isDuplicate) return showToast("هذا الحساب موجود مسبقاً في هذا القسم");
 
-    // التشفير بالنظام الجديد
     const encryptedPass = await encryptPass(pass);
     accounts.unshift({ id: Date.now(), email, pass: encryptedPass, folder: targetFolder });
 
@@ -624,7 +715,6 @@ function renderFoldersBar() {
     bar.appendChild(addBtn);
 }
 
-// دالة Render متزامنة وتمنع مشاكل الـ Async أثناء البحث السريع
 async function renderVault() {
     renderCounter++;
     const currentRender = renderCounter;
@@ -637,7 +727,6 @@ async function renderVault() {
     
     let finalDisplay = [];
     
-    // فك تشفير سريع في الذاكرة للعرض والبحث فقط
     for (let acc of displayAccounts) {
         let decryptedPass = "";
         if (searchVal) decryptedPass = await decryptPass(acc.pass);
@@ -650,7 +739,6 @@ async function renderVault() {
         finalDisplay.push(acc);
     }
     
-    // إذا قام المستخدم بكتابة حرف جديد أثناء فك التشفير، يتم إهمال الدورة القديمة
     if (currentRender !== renderCounter) return;
 
     list.innerHTML = '';
