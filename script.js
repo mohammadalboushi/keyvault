@@ -586,11 +586,18 @@ function submitPassword() {
 
 // ================= حفظ وعرض الحسابات =================
 function prepareSaveAccount() {
+    // 🛡️ فحص الأمان: منع إضافة أي حساب قبل فك التشفير
+    if (!cryptoKey) return showToast("عذراً، يجب فك تشفير الخزنة أولاً لحفظ حساب جديد");
+    
     const email = document.getElementById('emailInput').value.trim();
-    if (!email) { showToast("أدخل البيانات أولاً"); return; }
+    if (!email) {
+        showToast("أدخل البيانات أولاً");
+        return;
+    }
     isMoveAction = false;
     openFolderSelectModal("حفظ في");
 }
+
 
 async function saveAccount(targetFolder) {
     const email = document.getElementById('emailInput').value.trim();
@@ -827,6 +834,9 @@ function executeMove(targetFolder) {
 }
 
 function openAddFolderModal(renameTarget = null) {
+    // 🛡️ فحص الأمان: منع إنشاء مجلدات قبل فك التشفير
+    if (!cryptoKey) return showToast("عذراً، يجب فك تشفير الخزنة أولاً");
+    
     folderRenameTarget = renameTarget;
     document.getElementById('addFolderTitle').innerText = renameTarget ? "تعديل المجلد" : "مجلد جديد";
     const input = document.getElementById('folderNameInput');
