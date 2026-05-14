@@ -1,41 +1,21 @@
 const firebaseConfig = {
-
-  apiKey:
-  "AIzaSyC_iEb4UhUREVJ2mfj00BounPVaeGQr7wI",
-
-  authDomain:
-  "mohammadalboushi-e9231.firebaseapp.com",
-
-  databaseURL:
-  "https://mohammadalboushi-e9231-default-rtdb.firebaseio.com",
-
-  projectId:
-  "mohammadalboushi-e9231",
-
-  storageBucket:
-  "mohammadalboushi-e9231.firebasestorage.app",
-
-  messagingSenderId:
-  "236925802081",
-
-  appId:
-  "1:236925802081:web:2e26094ab5ecdf988f3c20",
-
-  measurementId:
-  "G-H9TLS38YXV"
-
+  apiKey: "AIzaSyC_iEb4UhUREVJ2mfj00BounPVaeGQr7wI",
+  authDomain: "mohammadalboushi-e9231.firebaseapp.com",
+  databaseURL: "https://mohammadalboushi-e9231-default-rtdb.firebaseio.com",
+  projectId: "mohammadalboushi-e9231",
+  storageBucket: "mohammadalboushi-e9231.firebasestorage.app",
+  messagingSenderId: "236925802081",
+  appId: "1:236925802081:web:2e26094ab5ecdf988f3c20",
+  measurementId: "G-H9TLS38YXV"
 };
-
 
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// تفعيل قاعدة البيانات لتعمل أوفلاين بذكاء
-db.enablePersistence()
-  .catch(function(err) {
+db.enablePersistence().catch(function(err) {
       console.log("خطأ في تفعيل الأوفلاين: ", err.code);
-  });
+});
 
 let accounts = [];
 let folders = ["عام", "فيسبوك", "جوجل"];
@@ -51,65 +31,88 @@ let isMoveAction = false;
 let folderRenameTarget = null;
 let vaultPressTimer = null;
 let currentSort = 'newest';
+let renderCounter = 0; // لمنع تداخل عمليات البحث غير المتزامنة
 
-let authMode = 'login'; // 'login' or 'signup'
+let authMode = 'login'; // 'login', 'signup', or 'unlock'
 
-// --- نظام التشفير (النسخة 10/10) ---
-let SECRET_KEY = sessionStorage.getItem('user_secret_key') || 'guest_offline_key';
-const APP_SALT = CryptoJS.enc.Utf8.parse("AbuFayez_Vault_Salt_2026_V2");
-let DERIVED_KEY = null; // الكاش السحري للأداء
+// ================= نظام التشفير العسكري الجديد (Web Crypto API) =================
+let cryptoKey = null; // الاحتفاظ بالمفتاح في الذاكرة الحية فقط
+let SECRET_KEY = null; // يستخدم فقط كدعم للبيانات القديمة
 
-function getStrongKey() {
-    if (DERIVED_KEY) return DERIVED_KEY;
-    // رفعنا قوة التشفير وعملنا كاش للمفتاح مشان ما ينفجر معالج الشاومي
-    DERIVED_KEY = CryptoJS.PBKDF2(SECRET_KEY, APP_SALT, { keySize: 256 / 32, iterations: 20000 });
-    return DERIVED_KEY;
+// تحويل رموز PIN إلى طلاسم لمنع قراءتها من الـ LocalStorage
+async function hashString(text) {
+    const msgBuffer = new TextEncoder().encode(text + "AbuFayez_Vault_PIN_Salt");
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function encryptPass(text) {
-    if (!text) return "";
-    const strongKey = getStrongKey();
-    const iv = CryptoJS.lib.WordArray.random(128 / 8); // IV عشوائي لكل عملية
-    const encrypted = CryptoJS.AES.encrypt(text, strongKey, { iv: iv });
-    // دمج الـ IV مع النص المشفر مشان نقدر نفكه بعدين
-    return iv.toString() + ":" + encrypted.toString();
+// توليد مفتاح قوي جداً باستخدام PBKDF2 في المتصفح
+async function generateKey(password) {
+    const enc = new TextEncoder();
+    const keyMaterial = await window.crypto.subtle.importKey(
+        "raw", enc.encode(password), {name: "PBKDF2"}, false, ["deriveBits", "deriveKey"]
+    );
+    cryptoKey = await window.crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt: enc.encode("AbuFayez_Vault_Salt_2026_V2"), iterations: 100000, hash: "SHA-256" },
+        keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+    );
 }
 
-function decryptPass(ciphertext) {
+// التشفير بوضعية AES-GCM الآمنة (مع التوقيع المدمج)
+async function encryptPass(text) {
+    if (!text || !cryptoKey) return "";
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encoded = new TextEncoder().encode(text);
+    const ciphertext = await window.crypto.subtle.encrypt({name: "AES-GCM", iv: iv}, cryptoKey, encoded);
+    
+    const ivBase64 = btoa(String.fromCharCode(...iv));
+    const cipherBase64 = btoa(String.fromCharCode(...new Uint8Array(ciphertext)));
+    return `v2:${ivBase64}:${cipherBase64}`; // v2 لتمييز التشفير الجديد
+}
+
+// فك التشفير مع دعم النسخ القديمة
+async function decryptPass(ciphertext) {
     if (!ciphertext) return "";
-    try {
-        const strongKey = getStrongKey();
-        
-        // فحص إذا كان النص المشفر بيحتوي على IV عشوائي (النسخة الجديدة)
-        if (ciphertext.includes(":")) {
-            const parts = ciphertext.split(":");
-            const iv = CryptoJS.enc.Hex.parse(parts[0]);
-            const encryptedData = parts[1];
-            const bytes = CryptoJS.AES.decrypt(encryptedData, strongKey, { iv: iv });
-            return bytes.toString(CryptoJS.enc.Utf8) || ciphertext;
-        } else {
-            // دعم النسخ القديمة (Fallback) عشان ما تضيع حساباتك القديمة
-            const bytes = CryptoJS.AES.decrypt(ciphertext, strongKey, { iv: CryptoJS.enc.Utf8.parse("AbuFayez_Vault_Salt_2026") });
-            const originalText = bytes.toString(CryptoJS.enc.Utf8);
-            if (!originalText) {
-                return CryptoJS.AES.decrypt(ciphertext, SECRET_KEY).toString(CryptoJS.enc.Utf8) || ciphertext;
-            }
-            return originalText;
-        }
-    } catch (e) {
+    
+    // النظام الجديد GCM
+    if (ciphertext.startsWith("v2:") && cryptoKey) {
         try {
-            return CryptoJS.AES.decrypt(ciphertext, SECRET_KEY).toString(CryptoJS.enc.Utf8) || ciphertext;
-        } catch(err) {
-            return ciphertext;
+            const parts = ciphertext.split(":");
+            const iv = Uint8Array.from(atob(parts[1]), c => c.charCodeAt(0));
+            const cipher = Uint8Array.from(atob(parts[2]), c => c.charCodeAt(0));
+            const decrypted = await window.crypto.subtle.decrypt({name: "AES-GCM", iv: iv}, cryptoKey, cipher);
+            return new TextDecoder().decode(decrypted);
+        } catch (e) {
+            return "خطأ بالفك (GCM)";
         }
+    } 
+    
+    // دعم النظام القديم (CryptoJS) حتى لا يضيع تعبك القديم
+    if (typeof CryptoJS !== 'undefined') {
+        try {
+            let DERIVED_KEY_OLD = CryptoJS.PBKDF2(SECRET_KEY || 'guest_offline_key', CryptoJS.enc.Utf8.parse("AbuFayez_Vault_Salt_2026_V2"), { keySize: 256 / 32, iterations: 20000 });
+            
+            if (ciphertext.includes(":")) {
+                const parts = ciphertext.split(":");
+                const iv = CryptoJS.enc.Hex.parse(parts[0]);
+                const bytes = CryptoJS.AES.decrypt(parts[1], DERIVED_KEY_OLD, { iv: iv });
+                return bytes.toString(CryptoJS.enc.Utf8) || ciphertext;
+            } else {
+                const bytes = CryptoJS.AES.decrypt(ciphertext, DERIVED_KEY_OLD, { iv: CryptoJS.enc.Utf8.parse("AbuFayez_Vault_Salt_2026") });
+                let originalText = bytes.toString(CryptoJS.enc.Utf8);
+                if (!originalText) originalText = CryptoJS.AES.decrypt(ciphertext, SECRET_KEY || "").toString(CryptoJS.enc.Utf8);
+                return originalText || ciphertext;
+            }
+        } catch(e) { return ciphertext; }
     }
+    return ciphertext;
 }
-// --------------------
+// =====================================================================
 
 
-
-// ================= نظام إدارة المستخدمين الجديد =================
-auth.onAuthStateChanged(user => {
+// ================= نظام إدارة المستخدمين =================
+auth.onAuthStateChanged(async user => {
     const userNameEl = document.getElementById('userName');
     const userEmailEl = document.getElementById('userEmail');
     const userAvatarEl = document.getElementById('userAvatar');
@@ -124,13 +127,19 @@ auth.onAuthStateChanged(user => {
         if(userNameEl) userNameEl.innerText = emailName;
         if(userEmailEl) userEmailEl.innerText = user.email;
         
-        // إنشاء أيقونة فخمة من أول حرف من إيميله
         if(userAvatarEl) {
             userAvatarEl.innerHTML = `<span style="font-size:24px; font-weight:bold; color:var(--primary); font-family: sans-serif;">${emailName.charAt(0).toUpperCase()}</span>`;
             userAvatarEl.style.background = 'rgba(139, 92, 246, 0.1)';
             userAvatarEl.style.borderColor = 'rgba(139, 92, 246, 0.3)';
         }
-        setupRealtimeListener(user.uid);
+        
+        // التحقق من وجود المفتاح بالذاكرة (لحماية الجلسة عند عمل Refresh)
+        if (!cryptoKey) {
+            openAuthModal('unlock', user.email);
+        } else {
+            setupRealtimeListener(user.uid);
+        }
+        
     } else {
         loginContainer.style.display = 'block';
         logoutContainer.style.display = 'none';
@@ -148,6 +157,10 @@ auth.onAuthStateChanged(user => {
             unsubscribeVault = null;
         }
         
+        // تفعيل وضع الزائر وتوليد مفتاح مؤقت
+        SECRET_KEY = 'guest_offline_key';
+        await generateKey(SECRET_KEY);
+        
         const localAccs = localStorage.getItem('localVaultEmailAccounts');
         const localFolds = localStorage.getItem('localVaultEmailFolders');
         accounts = localAccs ? JSON.parse(localAccs) : [];
@@ -158,13 +171,20 @@ auth.onAuthStateChanged(user => {
     }
 });
 
-// دوال التحكم بنافذة تسجيل الدخول الجديدة
-function openAuthModal() {
+function openAuthModal(mode = 'login', email = '') {
     closeSideMenu();
-    authMode = 'login';
+    authMode = mode;
     updateAuthUI();
-    document.getElementById('authEmail').value = '';
-    document.getElementById('authPass').value = '';
+    
+    if (mode === 'unlock') {
+        document.getElementById('authEmail').value = email;
+        document.getElementById('authEmail').disabled = true;
+        document.getElementById('authPass').value = '';
+    } else {
+        document.getElementById('authEmail').disabled = false;
+        document.getElementById('authEmail').value = '';
+        document.getElementById('authPass').value = '';
+    }
     showOverlay('authModal');
 }
 
@@ -175,21 +195,31 @@ function toggleAuthMode() {
 
 function updateAuthUI() {
     const title = document.getElementById('authTitle');
+    const sub = document.getElementById('authSub');
     const submitBtn = document.getElementById('authSubmitBtn');
     const toggleBtn = document.getElementById('authToggleBtn');
 
     if (authMode === 'login') {
         title.innerText = 'تسجيل الدخول';
+        sub.innerText = 'لحفظ ومزامنة بياناتك سحابياً';
         submitBtn.innerText = 'دخول للخزنة';
+        toggleBtn.style.display = 'block';
         toggleBtn.innerText = 'إنشاء حساب جديد';
-    } else {
+    } else if (authMode === 'signup') {
         title.innerText = 'حساب جديد';
+        sub.innerText = 'لحفظ ومزامنة بياناتك سحابياً';
         submitBtn.innerText = 'إنشاء الحساب';
+        toggleBtn.style.display = 'block';
         toggleBtn.innerText = 'لدي حساب بالفعل';
+    } else if (authMode === 'unlock') {
+        title.innerText = 'فك تشفير الخزنة 🔒';
+        sub.innerText = 'أدخل كلمة المرور لفك التشفير (حماية الذاكرة)';
+        submitBtn.innerText = 'فك التشفير';
+        toggleBtn.style.display = 'none';
     }
 }
 
-function submitAuth() {
+async function submitAuth() {
     const email = document.getElementById('authEmail').value.trim();
     const pass = document.getElementById('authPass').value;
 
@@ -199,45 +229,46 @@ function submitAuth() {
     const originalText = btn.innerText;
     btn.innerText = "جاري...";
 
+    if (authMode === 'unlock') {
+        try {
+            await generateKey(pass);
+            SECRET_KEY = pass;
+            setupRealtimeListener(auth.currentUser.uid);
+            goBack();
+            showToast("تم فتح الخزنة! 🔓");
+        } catch(e) {
+            showToast("حدث خطأ في توليد المفتاح");
+        }
+        btn.innerText = originalText;
+        return;
+    }
+
     if (authMode === 'login') {
         auth.signInWithEmailAndPassword(email, pass)
-            .then(() => { 
-                // هون التعديل: حفظنا الباسوورد كمفتاح تشفير بالذاكرة المؤقتة
-                sessionStorage.setItem('user_secret_key', pass);
+            .then(async () => { 
+                await generateKey(pass);
                 SECRET_KEY = pass;
-                
                 goBack(); 
                 showToast("أهلاً بك مجدداً في خزنتك! 🔒"); 
             })
-            .catch(err => {
-                console.error("Firebase Login Error:", err.code, err.message);
-                showToast(getAuthError(err.code));
-            })
+            .catch(err => showToast(getAuthError(err.code)))
             .finally(() => btn.innerText = originalText);
     } else {
         auth.createUserWithEmailAndPassword(email, pass)
-            .then(() => { 
-                // وهون كمان نفس التعديل للي بيعمل حساب جديد
-                sessionStorage.setItem('user_secret_key', pass);
+            .then(async () => { 
+                await generateKey(pass);
                 SECRET_KEY = pass;
-                
                 goBack(); 
                 showToast("تم إنشاء الحساب بنجاح! 🎉"); 
             })
-            .catch(err => {
-                console.error("Firebase Signup Error:", err.code, err.message);
-                showToast(getAuthError(err.code));
-            })
+            .catch(err => showToast(getAuthError(err.code)))
             .finally(() => btn.innerText = originalText);
     }
 }
 
-
-
 function handleResetPassword() {
     const email = document.getElementById('authEmail').value.trim();
     if(!email) return showToast("اكتب إيميلك بالخانة لنرسل لك الرابط");
-    
     auth.sendPasswordResetEmail(email)
         .then(() => { goBack(); showToast("تم إرسال رابط استعادة كلمة المرور إلى بريدك 📧"); })
         .catch(err => showToast("تأكد من كتابة إيميلك بشكل صحيح"));
@@ -248,21 +279,15 @@ function getAuthError(code) {
     if(code === 'auth/wrong-password') return "كلمة المرور خاطئة";
     if(code === 'auth/email-already-in-use') return "هذا الإيميل مسجل مسبقاً";
     if(code === 'auth/weak-password') return "كلمة المرور ضعيفة (6 أحرف على الأقل)";
-    
-    // التعديل هون: رح نخليه يطبع كود الخطأ الحقيقي اللي جاي من فايربيس
     return "الخطأ هو: " + code; 
 }
-
 
 function handleLogout() {
     closeSideMenu();
     customConfirm("هل تريد تسجيل الخروج؟", () => {
         auth.signOut().then(() => {
-            // التعديل هون: مسح المفتاح من الذاكرة وتصفير المتغير
-            sessionStorage.removeItem('user_secret_key');
-            SECRET_KEY = 'guest_offline_key';
-            DERIVED_KEY = null; // تصفير الكاش تبع المفتاح للحماية القسوى
-
+            cryptoKey = null;
+            SECRET_KEY = null;
             localStorage.removeItem('localVaultEmailAccounts');
             localStorage.removeItem('localVaultEmailFolders');
             accounts = [];
@@ -273,10 +298,8 @@ function handleLogout() {
     });
 }
 
-// ===============================================================
-
-// القائمة الجانبية
-function safeToggleMenu(e) {
+// ================= القوائم والقفل =================
+async function safeToggleMenu(e) {
     if(e) e.stopPropagation();
     const menu = document.getElementById('sideMenu');
     const overlay = document.getElementById('sideMenuOverlay');
@@ -285,10 +308,10 @@ function safeToggleMenu(e) {
         menu.classList.remove('open');
         overlay.classList.remove('active');
     } else {
-        const appPass = localStorage.getItem('appEmailPass');
-        if (appPass) {
-            openPasswordModal("رمز القائمة", (v) => {
-                if (v === appPass) {
+        const appHash = localStorage.getItem('appHash');
+        if (appHash) {
+            openPasswordModal("رمز القائمة", async (v) => {
+                if (await hashString(v) === appHash) {
                     menu.classList.add('open');
                     overlay.classList.add('active');
                     updateLockText(true);
@@ -313,22 +336,18 @@ function closeSideMenu() {
 
 function updateLockText(hasLock) {
     const lockText = document.getElementById('lockMenuText');
-    if(lockText) {
-        lockText.innerText = (hasLock || localStorage.getItem('appEmailPass')) ? "إلغاء قفل التطبيق" : "تعيين قفل للتطبيق";
-    }
+    if(lockText) lockText.innerText = (hasLock || localStorage.getItem('appHash')) ? "إلغاء قفل التطبيق" : "تعيين قفل للتطبيق";
 }
 
 function setSyncLoader(isSyncing, isError = false) { 
     const dot = document.getElementById('syncDot');
     if (dot) {
-        if (isError) {
-            dot.className = 'sync-dot error';
-        } else {
-            dot.className = isSyncing ? 'sync-dot syncing' : 'sync-dot synced';
-        }
+        if (isError) dot.className = 'sync-dot error';
+        else dot.className = isSyncing ? 'sync-dot syncing' : 'sync-dot synced';
     }
 }
 
+// ================= جلب البيانات =================
 function setupRealtimeListener(uid) {
     setSyncLoader(true);
     unsubscribeVault = db.collection('vaults').doc(uid).onSnapshot(docSnap => {
@@ -364,16 +383,13 @@ function setupRealtimeListener(uid) {
         accounts = cloudAccounts;
         folders = cloudFolders;
 
-        if (needsMerge || !docSnap.exists) {
-            saveToCloud();
-        }
+        if (needsMerge || !docSnap.exists) saveToCloud();
 
         applySort(currentSort, false); 
         renderFoldersBar();
         renderVault();
         setSyncLoader(false);
     }, error => {
-        console.error(error);
         setSyncLoader(false, true);
         showToast("فشل جلب البيانات");
     });
@@ -383,16 +399,9 @@ function saveToCloud() {
     const user = auth.currentUser;
     if(user) {
         setSyncLoader(true);
-        db.collection('vaults').doc(user.uid).set({
-            accounts: accounts,
-            folders: folders
-        }).then(() => {
-            setSyncLoader(false);
-        }).catch(error => {
-            console.error(error);
-            setSyncLoader(false, true);
-            showToast("حدث خطأ أثناء الحفظ");
-        });
+        db.collection('vaults').doc(user.uid).set({ accounts: accounts, folders: folders })
+          .then(() => setSyncLoader(false))
+          .catch(error => { setSyncLoader(false, true); showToast("حدث خطأ أثناء الحفظ"); });
     } else {
         localStorage.setItem('localVaultEmailAccounts', JSON.stringify(accounts));
         localStorage.setItem('localVaultEmailFolders', JSON.stringify(folders));
@@ -409,12 +418,10 @@ function exportDataAuto() {
     a.click();
 }
 
-
-
 function importDataWrapper(e) {
     closeSideMenu();
     const reader = new FileReader();
-    reader.onload = (f) => {
+    reader.onload = async (f) => {
         try {
             const imported = JSON.parse(f.target.result);
             const rawAccounts = Array.isArray(imported) ? imported : (imported.accounts || []);
@@ -427,10 +434,9 @@ function importDataWrapper(e) {
             }));
             
             const cleanAccounts = [];
-            // المفتاح القديم للإنقاذ وفك التشفير
             const OLD_KEY = "AbuFayez_Secure_Vault_2026"; 
 
-            rawAccounts.forEach(importedAcc => {
+            for (let importedAcc of rawAccounts) {
                 const rawEmail = importedAcc.email || importedAcc.title || "مستورد";
                 const emailLower = rawEmail.trim().toLowerCase();
                 const folder = importedAcc.folder || "عام";
@@ -438,25 +444,16 @@ function importDataWrapper(e) {
 
                 if (!seenCombinations.has(combo)) {
                     seenCombinations.add(combo);
-                    
                     let finalPass = importedAcc.pass || "...";
                     
-                    // إذا الباسوورد جاية مشفرة من النسخة القديمة
-                    if (finalPass.startsWith("U2FsdGVkX1")) {
+                    if (finalPass.startsWith("U2FsdGVkX1") && typeof CryptoJS !== 'undefined') {
                         try {
-                            // منفكها بالمفتاح القديم
                             const bytes = CryptoJS.AES.decrypt(finalPass, OLD_KEY);
                             const plainText = bytes.toString(CryptoJS.enc.Utf8);
-                            if (plainText) {
-                                // ومنرجع منشفرها فورا بالمفتاح الديناميكي الجديد للمستخدم
-                                finalPass = encryptPass(plainText); 
-                            }
-                        } catch(err) {
-                            console.log("خطأ بفك تشفير حساب:", rawEmail);
-                        }
-                    } else {
-                        // إذا كانت مو مشفرة أصلا
-                        finalPass = encryptPass(finalPass);
+                            if (plainText) finalPass = await encryptPass(plainText); 
+                        } catch(err) { console.log("خطأ بفك تشفير حساب:", rawEmail); }
+                    } else if (!finalPass.startsWith("v2:")) {
+                        finalPass = await encryptPass(finalPass);
                     }
                     
                     cleanAccounts.push({
@@ -466,45 +463,37 @@ function importDataWrapper(e) {
                         folder: folder
                     });
                 }
-            });
+            }
 
             accounts = [...accounts, ...cleanAccounts];
-
-            newFolders.forEach(f => {
-                if(!folders.includes(f)) folders.push(f);
-            });
+            newFolders.forEach(f => { if(!folders.includes(f)) folders.push(f); });
 
             saveToCloud();
             renderFoldersBar();
             applySort(currentSort);
 
-            showToast("تم استعادة البيانات وتحديث التشفير بنجاح! 🚀");
-            
+            showToast("تم استعادة البيانات بنجاح! 🚀");
         } catch(err){
             showToast("ملف غير صالح");
         }
     };
-    if(e.target.files.length > 0) {
-        reader.readAsText(e.target.files[0]);
-    }
+    if(e.target.files.length > 0) reader.readAsText(e.target.files[0]);
 }
 
-
-function handleAppLockSettings() {
+async function handleAppLockSettings() {
     closeSideMenu();
-    const appPass = localStorage.getItem('appEmailPass');
-    if(appPass) {
-        openPasswordModal("أدخل الرمز لإزالته", (v) => {
-            if(v === appPass) { 
-                localStorage.removeItem('appEmailPass'); 
+    const appHash = localStorage.getItem('appHash');
+    if(appHash) {
+        openPasswordModal("أدخل الرمز لإزالته", async (v) => {
+            if(await hashString(v) === appHash) { 
+                localStorage.removeItem('appHash'); 
                 showToast("تم إزالة القفل");
-            }
-            else showToast("خطأ في الرمز");
+            } else showToast("خطأ في الرمز");
         });
     } else {
-        openPasswordModal("تعيين رمز جديد", (v) => { 
+        openPasswordModal("تعيين رمز جديد", async (v) => { 
             if(v) { 
-                localStorage.setItem('appEmailPass', v); 
+                localStorage.setItem('appHash', await hashString(v)); 
                 showToast("تم القفل");
             } 
         });
@@ -520,9 +509,8 @@ function confirmDeleteAll() {
     });
 }
 
-function pushHistory(type = 'modal') { 
-    window.history.pushState({modal: type}, null, window.location.href); 
-}
+// ================= التنقل والنوافذ =================
+function pushHistory(type = 'modal') { window.history.pushState({modal: type}, null, window.location.href); }
 
 function goBack() { 
     if(window.history.state) {
@@ -556,11 +544,8 @@ window.onpopstate = () => {
     });
     if(!closedModal) {
         const vault = document.getElementById('vaultPage');
-        if(vault && vault.style.display === 'flex') {
-            vault.style.display = 'none';
-        } else {
-            closeSideMenu();
-        }
+        if(vault && vault.style.display === 'flex') vault.style.display = 'none';
+        else closeSideMenu();
     }
 };
 
@@ -580,35 +565,27 @@ function submitPassword() {
     pendingCallback = null;
 }
 
+// ================= حفظ وعرض الحسابات =================
 function prepareSaveAccount() {
     const email = document.getElementById('emailInput').value.trim();
-    if (!email) {
-        showToast("أدخل البيانات أولاً");
-        return;
-    }
+    if (!email) { showToast("أدخل البيانات أولاً"); return; }
     isMoveAction = false;
     openFolderSelectModal("حفظ في");
 }
 
-function saveAccount(targetFolder) {
+async function saveAccount(targetFolder) {
     const email = document.getElementById('emailInput').value.trim();
     const pass = document.getElementById('passInput').value;
     
     const lowerEmail = email.toLowerCase();
-    const isDuplicate = accounts.some(acc => 
-        (acc.email || "").trim().toLowerCase() === lowerEmail && acc.folder === targetFolder
-    );
+    const isDuplicate = accounts.some(acc => (acc.email || "").trim().toLowerCase() === lowerEmail && acc.folder === targetFolder);
 
-    if (isDuplicate) {
-        showToast("هذا الحساب موجود مسبقاً في هذا القسم");
-        return;
-    }
+    if (isDuplicate) return showToast("هذا الحساب موجود مسبقاً في هذا القسم");
 
-    // --- التشفير قبل الحفظ ---
-    const encryptedPass = encryptPass(pass);
-accounts.unshift({ id: Date.now(), email, pass: encryptedPass, folder: targetFolder });
+    // التشفير بالنظام الجديد
+    const encryptedPass = await encryptPass(pass);
+    accounts.unshift({ id: Date.now(), email, pass: encryptedPass, folder: targetFolder });
 
-    
     saveToCloud();
     document.getElementById('emailInput').value = '';
     document.getElementById('passInput').value = '';
@@ -619,11 +596,10 @@ accounts.unshift({ id: Date.now(), email, pass: encryptedPass, folder: targetFol
 function renderFoldersBar() {
     const bar = document.getElementById('foldersBar');
     bar.innerHTML = '';
-    let totalCount = accounts.length;
     
     const allChip = document.createElement('div');
     allChip.className = `chip ${activeFolder === 'All' ? 'active' : ''}`;
-    allChip.innerText = `الكل (${totalCount})`;
+    allChip.innerText = `الكل (${accounts.length})`;
     allChip.onclick = () => { activeFolder = 'All'; renderVault(); renderFoldersBar(); };
     bar.appendChild(allChip);
     
@@ -648,28 +624,43 @@ function renderFoldersBar() {
     bar.appendChild(addBtn);
 }
 
-function renderVault() {
+// دالة Render متزامنة وتمنع مشاكل الـ Async أثناء البحث السريع
+async function renderVault() {
+    renderCounter++;
+    const currentRender = renderCounter;
+    
     const list = document.getElementById('vaultList');
     const searchVal = document.getElementById('searchInput').value ? document.getElementById('searchInput').value.toLowerCase() : '';
-    list.innerHTML = '';
+    
     let displayAccounts = accounts;
     if (activeFolder !== 'All') displayAccounts = displayAccounts.filter(acc => acc.folder === activeFolder);
     
-    if(searchVal) {
-        displayAccounts = displayAccounts.filter(acc => {
+    let finalDisplay = [];
+    
+    // فك تشفير سريع في الذاكرة للعرض والبحث فقط
+    for (let acc of displayAccounts) {
+        let decryptedPass = "";
+        if (searchVal) decryptedPass = await decryptPass(acc.pass);
+        
+        if(searchVal) {
             const matchEmail = acc.email && acc.email.toLowerCase().includes(searchVal);
-            const decrypted = decryptPass(acc.pass) || ""; // تأمين المتغير
-            const matchPass = acc.pass && decrypted.toLowerCase().includes(searchVal);
-            return matchEmail || matchPass;
-        });
+            const matchPass = decryptedPass && decryptedPass.toLowerCase().includes(searchVal);
+            if (!matchEmail && !matchPass) continue;
+        }
+        finalDisplay.push(acc);
     }
     
-    if(displayAccounts.length === 0) { 
+    // إذا قام المستخدم بكتابة حرف جديد أثناء فك التشفير، يتم إهمال الدورة القديمة
+    if (currentRender !== renderCounter) return;
+
+    list.innerHTML = '';
+    
+    if(finalDisplay.length === 0) { 
         list.innerHTML = '<div style="text-align:center; padding:60px 20px; color:var(--text-3);"><svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="opacity:0.3; margin-bottom:10px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><h3>لا توجد حسابات</h3></div>'; 
         return; 
     }
     
-    displayAccounts.forEach(acc => {
+    finalDisplay.forEach(acc => {
         const card = document.createElement('div');
         card.className = `account-card ${selectedIds.has(acc.id) ? 'selected-card' : ''}`;
         card.setAttribute('data-id', acc.id);
@@ -703,7 +694,6 @@ function renderVault() {
     });
 }
 
-
 function toggleSelectionMode() {
     isSelectionMode = !isSelectionMode;
     selectedIds.clear();
@@ -720,9 +710,9 @@ function toggleSelectionMode() {
     renderVault();
 }
 
-function deleteSelected() {
+async function deleteSelected() {
     if(selectedIds.size === 0) return;
-    const appPass = localStorage.getItem('appEmailPass');
+    const appHash = localStorage.getItem('appHash');
     
     const doDelete = () => {
         customConfirm(`هل أنت متأكد من الحذف؟`, () => {
@@ -734,14 +724,12 @@ function deleteSelected() {
         });
     };
 
-    if (appPass) {
-        openPasswordModal("أدخل الرمز للحذف", (v) => {
-            if (v === appPass) doDelete();
+    if (appHash) {
+        openPasswordModal("أدخل الرمز للحذف", async (v) => {
+            if (await hashString(v) === appHash) doDelete();
             else showToast("رمز خاطئ");
         });
-    } else {
-        doDelete();
-    }
+    } else doDelete();
 }
 
 function handleCardClick(e, id) {
@@ -756,13 +744,13 @@ function handleCardClick(e, id) {
     }
 }
 
-function handlePassClick(id) {
+async function handlePassClick(id) {
     if(isLongPress) return;
     const el = document.getElementById(`pass-${id}`);
     const acc = accounts.find(a => a.id === id);
     
     if(el.classList.contains('hidden-pass')) {
-         el.innerText = decryptPass(acc.pass) || '...'; 
+         el.innerText = await decryptPass(acc.pass) || '...'; 
          el.classList.remove('hidden-pass');
          el.style.fontSize = "16px"; el.style.letterSpacing = "0";
          
@@ -780,7 +768,7 @@ function handlePassClick(id) {
     }
 }
 
-
+// ================= المجلدات =================
 function openFolderSelectModal(title) {
     showOverlay('folderSelectModal');
     document.getElementById('folderModalTitle').innerText = title;
@@ -790,11 +778,9 @@ function openFolderSelectModal(title) {
     addRow.className = 'move-folder-option';
     addRow.style.color = 'var(--primary)';
     addRow.innerHTML = '+ مجلد جديد';
-    addRow.onclick = () => { 
-        setTimeout(openAddFolderModal, 200); 
-        goBack(); 
-    };
+    addRow.onclick = () => { setTimeout(openAddFolderModal, 200); goBack(); };
     listBody.appendChild(addRow);
+    
     folders.forEach(f => {
         const row = document.createElement('div');
         row.className = 'move-folder-option';
@@ -802,7 +788,6 @@ function openFolderSelectModal(title) {
         row.onclick = () => {
             if (isMoveAction) executeMove(f);
             else saveAccount(f);
-            
             setTimeout(() => goBack(), 50);
         };
         listBody.appendChild(row);
@@ -845,11 +830,7 @@ function submitFolder() {
     setTimeout(() => goBack(), 50);
 }
 
-function startFolderPress(f) {
-    isLongPress = false;
-    longPressTimer = setTimeout(() => { isLongPress = true; if(f!=='عام') openAddFolderModal(f); }, 600);
-}
-
+// ================= السحب والإفلات =================
 let draggingItem = null;
 function initDrag(e) {
     if(isSelectionMode) return;
@@ -886,6 +867,7 @@ function saveNewOrder() {
     const cards = list.querySelectorAll('.account-card');
     const reorderedIds = [];
     cards.forEach(c => reorderedIds.push(Number(c.getAttribute('data-id'))));
+    
     if(activeFolder !== 'All') {
         const folderItems = accounts.filter(a => a.folder === activeFolder);
         const sortedFolderItems = [];
@@ -906,6 +888,11 @@ function saveNewOrder() {
     saveToCloud();
 }
 
+// ================= قائمة السياق (نسخ/تعديل/حذف) =================
+function startFolderPress(f) {
+    isLongPress = false;
+    longPressTimer = setTimeout(() => { isLongPress = true; if(f!=='عام') openAddFolderModal(f); }, 600);
+}
 function startPress(type, id) {
     isLongPress = false;
     longPressTimer = setTimeout(() => { isLongPress = true; openContextMenu(type, id); }, 800);
@@ -921,14 +908,13 @@ function openContextMenu(type, id) {
 function ctxAction(action) {
     goBack();
     const acc = accounts.find(a => a.id === currentCtxId);
-    const appPass = localStorage.getItem('appEmailPass');
+    const appHash = localStorage.getItem('appHash');
     
-    setTimeout(() => {
+    setTimeout(async () => {
         if (!acc) return;
         
         if (action === 'copy') {
-            // --- فك التشفير عند النسخ ---
-            copyToClipboard(currentCtxType === 'email' ? acc.email : decryptPass(acc.pass));
+            copyToClipboard(currentCtxType === 'email' ? acc.email : await decryptPass(acc.pass));
         } 
         else if (action === 'delete') {
             const doDelete = () => {
@@ -941,20 +927,17 @@ function ctxAction(action) {
                 });
             };
 
-            if (appPass) {
-                openPasswordModal("أدخل الرمز للحذف", (v) => {
-                    if (v === appPass) doDelete();
+            if (appHash) {
+                openPasswordModal("أدخل الرمز للحذف", async (v) => {
+                    if (await hashString(v) === appHash) doDelete();
                     else showToast("رمز خاطئ");
                 });
-            } else {
-                doDelete();
-            }
+            } else doDelete();
         } 
         else if (action === 'edit') {
-            const doEdit = () => {
+            const doEdit = async () => {
                 document.getElementById('emailInput').value = acc.email;
-                // --- فك التشفير قبل التعديل ---
-                document.getElementById('passInput').value = decryptPass(acc.pass);
+                document.getElementById('passInput').value = await decryptPass(acc.pass);
                 accounts = accounts.filter(a => a.id !== currentCtxId);
                 saveToCloud(); 
                 renderVault();
@@ -962,18 +945,17 @@ function ctxAction(action) {
                 if(document.getElementById('vaultPage').style.display === 'flex') goBack();
             };
 
-            if (appPass) {
-                openPasswordModal("أدخل الرمز للتعديل", (v) => {
-                    if (v === appPass) doEdit();
+            if (appHash) {
+                openPasswordModal("أدخل الرمز للتعديل", async (v) => {
+                    if (await hashString(v) === appHash) await doEdit();
                     else showToast("رمز خاطئ");
                 });
-            } else {
-                doEdit();
-            }
+            } else await doEdit();
         }
     }, 200);
 }
 
+// ================= الأمان العام والمساعدات =================
 function openPasswordModal(t, cb) {
     document.getElementById('passModalTitle').innerText = t;
     document.getElementById('globalPassInput').value = '';
@@ -997,28 +979,35 @@ function startVaultPress() {
 }
 function cancelVaultPress() { clearTimeout(vaultPressTimer); }
 
-function handleVaultLongPress() {
-    const vp = localStorage.getItem('vaultEmailPass');
-    if(vp) openPasswordModal("إزالة قفل الخزنة", v => { 
-        if(v===vp){ 
-            localStorage.removeItem('vaultEmailPass'); 
-            showToast("تم الإلغاء"); 
-        } else showToast("خطأ"); 
-    });
-    else openPasswordModal("قفل الخزنة", v => { 
-        if(v){ 
-            localStorage.setItem('vaultEmailPass', v); 
-            showToast("تم القفل");
-        } 
-    });
+async function handleVaultLongPress() {
+    const vpHash = localStorage.getItem('vaultHash');
+    if(vpHash) {
+        openPasswordModal("إزالة قفل الخزنة", async v => { 
+            if(await hashString(v) === vpHash){ 
+                localStorage.removeItem('vaultHash'); 
+                showToast("تم الإلغاء"); 
+            } else showToast("خطأ"); 
+        });
+    } else {
+        openPasswordModal("قفل الخزنة", async v => { 
+            if(v){ 
+                localStorage.setItem('vaultHash', await hashString(v)); 
+                showToast("تم القفل");
+            } 
+        });
+    }
 }
 
-function openVaultCheck() {
+async function openVaultCheck() {
     if(isLongPress) return;
     
-    const vp = localStorage.getItem('vaultEmailPass');
-    if(vp) openPasswordModal("رمز الخزنة", v => { if(v===vp) openVault(); else showToast("خطأ"); });
-    else openVault();
+    const vpHash = localStorage.getItem('vaultHash');
+    if(vpHash) {
+        openPasswordModal("رمز الخزنة", async v => { 
+            if(await hashString(v) === vpHash) openVault(); 
+            else showToast("خطأ"); 
+        });
+    } else openVault();
 }
 
 function openVault() {
@@ -1057,9 +1046,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const vaultList = document.getElementById('vaultList');
-    if (vaultList) {
-        vaultList.addEventListener('scroll', cancelPress);
-    }
+    if (vaultList) vaultList.addEventListener('scroll', cancelPress);
 });
 
 function clearSearch() {
