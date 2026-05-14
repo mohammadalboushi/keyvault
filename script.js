@@ -414,6 +414,7 @@ function saveToCloud() {
 
 function exportDataAuto() {
     closeSideMenu();
+    if (!cryptoKey) return showToast("يجب فك التشفير لتتمكن من تصدير النسخة");
     const dataToSave = { accounts: accounts, folders: folders };
     const blob = new Blob([JSON.stringify(dataToSave)], {type: "application/json"});
     const a = document.createElement('a');
@@ -424,6 +425,11 @@ function exportDataAuto() {
 
 function importDataWrapper(e) {
     closeSideMenu();
+    if (!cryptoKey) {
+        showToast("فك تشفير الخزنة أولاً قبل استيراد بيانات جديدة");
+        e.target.value = '';
+        return;
+    }
     const reader = new FileReader();
     reader.onload = async (f) => {
         try {
@@ -486,6 +492,7 @@ function importDataWrapper(e) {
 
 async function handleAppLockSettings() {
     closeSideMenu();
+    if (!cryptoKey) return showToast("يجب فك التشفير للتحكم بإعدادات القفل");
     const appHash = localStorage.getItem('appHash');
     if(appHash) {
         openPasswordModal("أدخل الرمز لإزالته", async (v) => {
@@ -506,6 +513,7 @@ async function handleAppLockSettings() {
 
 function confirmDeleteAll() {
     closeSideMenu();
+    if (!cryptoKey) return showToast("عذراً، يجب فك تشفير الخزنة أولاً للقيام بهذا الإجراء");
     customConfirm("حذف كل البيانات نهائياً؟", () => {
         accounts = []; folders = ["عام"];
         saveToCloud();
