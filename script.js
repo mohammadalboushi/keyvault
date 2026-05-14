@@ -423,6 +423,13 @@ function exportDataAuto() {
     a.click();
 }
 
+// 🛡️ دالة حماية زر الاستيراد قبل فتح ملفات الهاتف
+function triggerImport() {
+    closeSideMenu();
+    if (!cryptoKey) return showToast("عذراً، يجب فك تشفير الخزنة أولاً لاستيراد البيانات");
+    document.getElementById('importFile').click();
+}
+
 function importDataWrapper(e) {
     closeSideMenu();
     if (!cryptoKey) {
