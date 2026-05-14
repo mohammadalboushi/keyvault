@@ -33,6 +33,15 @@ let vaultPressTimer = null;
 let currentSort = 'newest';
 let renderCounter = 0; // لمنع تداخل عمليات البحث غير المتزامنة
 
+// 🛡️ دالة تعقيم المدخلات لقتل هجمات XSS نهائياً
+function escapeHTML(str) {
+    if (!str) return "";
+    return str.toString().replace(/[&<>'"]/g, function(tag) {
+        const charsToReplace = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' };
+        return charsToReplace[tag] || tag;
+    });
+}
+
 let authMode = 'login'; // 'login', 'signup', or 'unlock'
 
 // ================= نظام التشفير العسكري الجديد (Web Crypto API) =================
@@ -690,7 +699,9 @@ async function renderVault() {
         const card = document.createElement('div');
         card.className = `account-card ${selectedIds.has(acc.id) ? 'selected-card' : ''}`;
         card.setAttribute('data-id', acc.id);
-        const displayName = acc.email || "بدون عنوان";
+        
+        // 🛡️ تمرير الإيميل على فلتر التعقيم قبل عرضه بالواجهة
+        const displayName = escapeHTML(acc.email) || "بدون عنوان";
         
         let leftSide = '';
         if (isSelectionMode) {
