@@ -336,6 +336,7 @@ input, textarea {
 .card-pass-pill {
     background: var(--bg); padding: 8px 12px; border-radius: 8px; text-align: center;
     font-family: monospace; color: var(--text); cursor: pointer; letter-spacing: 2px; font-size: 18px; border: 1px solid var(--gray-border);
+    direction: ltr; unicode-bidi: isolate;
 }
 .hidden-pass { color: var(--text-3); letter-spacing: 4px; font-size: 22px; line-height: 0.8; padding: 12px;}
 
