@@ -719,14 +719,14 @@ async function renderVault() {
         }
         
         card.innerHTML = `
+            ${activeFolder === 'All' ? `<div style="position: absolute; top: 6px; right: 12px; width: 55px; box-sizing: border-box; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; font-size: 8.5px; background: var(--primary); color: #fff; padding: 2px 4px; border-radius: 4px; font-weight: 800; z-index: 2; box-shadow: 0 1px 3px rgba(0,0,0,0.2); direction: rtl;">${escapeHTML(acc.folder || 'عام')}</div>` : ''}
             ${leftSide}
             <div class="card-main" onclick="handleCardClick(event, ${acc.id})">
-                                <div class="card-email" 
+                <div class="card-email" 
                      onmousedown="startPress('email', ${acc.id})" ontouchstart="startPress('email', ${acc.id})" 
                      ontouchmove="cancelPress()"
                      onmouseup="cancelPress()" ontouchend="cancelPress()">
-                    <span>${displayName}</span>${activeFolder === 'All' ? `<span style="font-size: 11px; background: rgba(139, 92, 246, 0.12); color: var(--primary); padding: 3px 8px; border-radius: 6px; margin-right: 6px; font-weight: 700; vertical-align: middle;">${escapeHTML(acc.folder || 'عام')}</span>` : ''}
-                    ${acc.notes ? '<svg style="margin-right: 5px; opacity: 0.5; vertical-align: middle;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>' : ''}
+                    <span>${displayName}</span>${acc.notes ? '<svg style="margin-right: 5px; opacity: 0.5; vertical-align: middle;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>' : ''}
                 </div>
                 <div id="pass-${acc.id}" class="card-pass-pill hidden-pass"
                     onmousedown="startPress('pass', ${acc.id})" ontouchstart="startPress('pass', ${acc.id})" 
