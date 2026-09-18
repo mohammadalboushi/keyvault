@@ -246,6 +246,8 @@ async function submitAuth() {
                 SECRET_KEY = pass;
                 setupRealtimeListener(auth.currentUser.uid);
                 goBack();
+                document.getElementById('itemTitle').value = '';
+                document.getElementById('itemKey').value = '';
                 showToast("تم فتح الخزنة! 🔓");
             })
             .catch(err => {
@@ -598,7 +600,7 @@ function prepareSaveAccount() {
     // 🛡️ فحص الأمان: منع إضافة أي حساب قبل فك التشفير
     if (!cryptoKey) return showToast("عذراً، يجب فك تشفير الخزنة أولاً لحفظ حساب جديد");
     
-    const email = document.getElementById('emailInput').value.trim();
+    const email = document.getElementById('itemTitle').value.trim();
     if (!email) {
         showToast("أدخل البيانات أولاً");
         return;
@@ -609,8 +611,8 @@ function prepareSaveAccount() {
 
 
 async function saveAccount(targetFolder) {
-    const email = document.getElementById('emailInput').value.trim();
-    const pass = document.getElementById('passInput').value;
+    const email = document.getElementById('itemTitle').value.trim();
+    const pass = document.getElementById('itemKey').value;
     const notes = document.getElementById('notesInput').value;
     
     const lowerEmail = email.toLowerCase();
@@ -625,8 +627,8 @@ async function saveAccount(targetFolder) {
     accounts.unshift({ id: Date.now(), email, pass: encryptedPass, notes: encryptedNotes, folder: targetFolder });
 
     saveToCloud();
-    document.getElementById('emailInput').value = '';
-    document.getElementById('passInput').value = '';
+    document.getElementById('itemTitle').value = '';
+    document.getElementById('itemKey').value = '';
     document.getElementById('notesInput').value = '';
     applySort(currentSort); 
     showToast("تم الحفظ بنجاح");
@@ -719,11 +721,11 @@ async function renderVault() {
         card.innerHTML = `
             ${leftSide}
             <div class="card-main" onclick="handleCardClick(event, ${acc.id})">
-                <div class="card-email" 
+                                <div class="card-email" 
                      onmousedown="startPress('email', ${acc.id})" ontouchstart="startPress('email', ${acc.id})" 
                      ontouchmove="cancelPress()"
                      onmouseup="cancelPress()" ontouchend="cancelPress()">
-                    <span>${displayName}</span>
+                    <span>${displayName}</span>${activeFolder === 'All' ? `<span style="font-size: 11px; background: rgba(139, 92, 246, 0.12); color: var(--primary); padding: 3px 8px; border-radius: 6px; margin-right: 6px; font-weight: 700; vertical-align: middle;">${escapeHTML(acc.folder || 'عام')}</span>` : ''}
                     ${acc.notes ? '<svg style="margin-right: 5px; opacity: 0.5; vertical-align: middle;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>' : ''}
                 </div>
                 <div id="pass-${acc.id}" class="card-pass-pill hidden-pass"
@@ -1037,8 +1039,8 @@ function ctxAction(action) {
         } 
         else if (action === 'edit') {
             const doEdit = async () => {
-                document.getElementById('emailInput').value = acc.email;
-                document.getElementById('passInput').value = await decryptPass(acc.pass);
+                document.getElementById('itemTitle').value = acc.email;
+                document.getElementById('itemKey').value = await decryptPass(acc.pass);
                 const notesInput = document.getElementById('notesInput');
                 if (notesInput) notesInput.value = acc.notes ? await decryptPass(acc.notes) : '';
                 accounts = accounts.filter(a => a.id !== currentCtxId);
