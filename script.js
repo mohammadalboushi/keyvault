@@ -611,6 +611,7 @@ function prepareSaveAccount() {
 async function saveAccount(targetFolder) {
     const email = document.getElementById('emailInput').value.trim();
     const pass = document.getElementById('passInput').value;
+    const notes = document.getElementById('notesInput').value;
     
     const lowerEmail = email.toLowerCase();
     const isDuplicate = accounts.some(acc => (acc.email || "").trim().toLowerCase() === lowerEmail && acc.folder === targetFolder);
@@ -619,11 +620,14 @@ async function saveAccount(targetFolder) {
 
     // التشفير بالنظام الجديد
     const encryptedPass = await encryptPass(pass);
-    accounts.unshift({ id: Date.now(), email, pass: encryptedPass, folder: targetFolder });
+    const encryptedNotes = notes ? await encryptPass(notes) : "";
+    
+    accounts.unshift({ id: Date.now(), email, pass: encryptedPass, notes: encryptedNotes, folder: targetFolder });
 
     saveToCloud();
     document.getElementById('emailInput').value = '';
     document.getElementById('passInput').value = '';
+    document.getElementById('notesInput').value = '';
     applySort(currentSort); 
     showToast("تم الحفظ بنجاح");
 }
@@ -720,11 +724,16 @@ async function renderVault() {
                      ontouchmove="cancelPress()"
                      onmouseup="cancelPress()" ontouchend="cancelPress()">
                     <span>${displayName}</span>
+                    ${acc.notes ? '<svg style="margin-right: 5px; opacity: 0.5; vertical-align: middle;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>' : ''}
                 </div>
                 <div id="pass-${acc.id}" class="card-pass-pill hidden-pass"
                     onmousedown="startPress('pass', ${acc.id})" ontouchstart="startPress('pass', ${acc.id})" 
                     ontouchmove="cancelPress()"
                     onmouseup="cancelPress()" ontouchend="cancelPress()">••••••••</div>
+                ${acc.notes ? `<div id="notes-${acc.id}" class="card-notes hidden-notes" style="display: none; padding: 10px; background: var(--bg); border-radius: 8px; margin-top: 8px; font-size: 13px; white-space: pre-wrap; border: 1px solid var(--gray-border); color: var(--text-2); text-align: right; direction: ltr;"
+                    onmousedown="startPress('notes', ${acc.id})" ontouchstart="startPress('notes', ${acc.id})" 
+                    ontouchmove="cancelPress()"
+                    onmouseup="cancelPress()" ontouchend="cancelPress()"></div>` : ''}
             </div>
         `;
         list.appendChild(card);
@@ -784,6 +793,7 @@ function handleCardClick(e, id) {
 async function handlePassClick(id) {
     if(isLongPress) return;
     const el = document.getElementById(`pass-${id}`);
+    const notesEl = document.getElementById(`notes-${id}`);
     const acc = accounts.find(a => a.id === id);
     
     if(el.classList.contains('hidden-pass')) {
@@ -791,17 +801,24 @@ async function handlePassClick(id) {
          el.classList.remove('hidden-pass');
          el.style.fontSize = "16px"; el.style.letterSpacing = "0";
          
+         if (notesEl && acc.notes) {
+             notesEl.innerText = await decryptPass(acc.notes) || '';
+             notesEl.style.display = 'block';
+         }
+         
          setTimeout(() => {
              if(!el.classList.contains('hidden-pass')) {
                  el.innerText = '••••••••'; 
                  el.classList.add('hidden-pass'); 
                  el.style.fontSize = "22px"; el.style.letterSpacing = "4px";
+                 if (notesEl) notesEl.style.display = 'none';
              }
-         }, 3000);
+         }, 4000); // زدنا الوقت قليلاً لتتمكن من قراءة التفاصيل
     } else { 
          el.innerText = '••••••••'; 
          el.classList.add('hidden-pass'); 
          el.style.fontSize = "22px"; el.style.letterSpacing = "4px";
+         if (notesEl) notesEl.style.display = 'none';
     }
 }
 
@@ -929,10 +946,51 @@ function saveNewOrder() {
 }
 
 // ================= قائمة السياق (نسخ/تعديل/حذف) =================
+let currentCtxFolder = null;
+
 function startFolderPress(f) {
     isLongPress = false;
-    longPressTimer = setTimeout(() => { isLongPress = true; if(f!=='عام') openAddFolderModal(f); }, 600);
+    longPressTimer = setTimeout(() => { 
+        isLongPress = true; 
+        if(f !== 'عام') {
+            currentCtxFolder = f;
+            showOverlay('folderContextModal');
+            if (navigator.vibrate) navigator.vibrate(50);
+        }
+    }, 600);
 }
+
+function folderCtxAction(action) {
+    goBack();
+    setTimeout(() => {
+        if (action === 'edit') {
+            openAddFolderModal(currentCtxFolder);
+        } else if (action === 'delete') {
+            const appHash = localStorage.getItem('appHash');
+            const doDelete = () => {
+                customConfirm(`سيتم حذف المجلد "${currentCtxFolder}" وجميع الحسابات الموجودة بداخله نهائياً. هل أنت متأكد؟`, () => {
+                    folders = folders.filter(f => f !== currentCtxFolder);
+                    accounts = accounts.filter(a => a.folder !== currentCtxFolder);
+                    
+                    if (activeFolder === currentCtxFolder) activeFolder = 'All';
+                    
+                    saveToCloud();
+                    renderVault();
+                    renderFoldersBar();
+                    showToast("تم حذف المجلد ومحتوياته بنجاح");
+                });
+            };
+
+            if (appHash) {
+                openPasswordModal("أدخل الرمز للحذف", async (v) => {
+                    if (await hashString(v) === appHash) doDelete();
+                    else showToast("رمز خاطئ");
+                });
+            } else doDelete();
+        }
+    }, 200);
+}
+
 function startPress(type, id) {
     isLongPress = false;
     longPressTimer = setTimeout(() => { isLongPress = true; openContextMenu(type, id); }, 800);
@@ -954,7 +1012,10 @@ function ctxAction(action) {
         if (!acc) return;
         
         if (action === 'copy') {
-            copyToClipboard(currentCtxType === 'email' ? acc.email : await decryptPass(acc.pass));
+            let textToCopy = acc.email;
+            if (currentCtxType === 'pass') textToCopy = await decryptPass(acc.pass);
+            if (currentCtxType === 'notes') textToCopy = await decryptPass(acc.notes);
+            copyToClipboard(textToCopy);
         } 
         else if (action === 'delete') {
             const doDelete = () => {
@@ -978,6 +1039,8 @@ function ctxAction(action) {
             const doEdit = async () => {
                 document.getElementById('emailInput').value = acc.email;
                 document.getElementById('passInput').value = await decryptPass(acc.pass);
+                const notesInput = document.getElementById('notesInput');
+                if (notesInput) notesInput.value = acc.notes ? await decryptPass(acc.notes) : '';
                 accounts = accounts.filter(a => a.id !== currentCtxId);
                 saveToCloud(); 
                 renderVault();
@@ -1095,8 +1158,14 @@ function clearSearch() {
     renderVault();
 }
 
+let searchTimeout;
 document.getElementById('searchInput')?.addEventListener('input', function() {
     document.getElementById('clearSearchBtn').style.display = this.value ? 'block' : 'none';
+    
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        renderVault();
+    }, 300); // تأخير 300 ملي ثانية قبل تنفيذ فك التشفير والبحث
 });
 
 function openSortModal() {
